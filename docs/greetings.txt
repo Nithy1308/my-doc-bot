@@ -1,0 +1,17 @@
+[
+  { "text": "Hi!", "response": "Hello there, how can I help you today?" },
+  { "text": "hi!", "response": "Hello there, how can I help you today?" },
+  { "text": "Hi",  "response": "Hello there, how can I help you today?" },
+  { "text": "hi",  "response": "Hello there, how can I help you today?" },
+  { "text": "Hey", "response": "Hello there, how can I help you today?" },
+  { "text": "Helo","response": "Hi there, how can I help you today?" },
+
+  { "text": "Hello",        "response": "Hi, how can I help you today?" },
+  { "text": "Good morning", "response": "Good morning! How may I assist you today?" },
+  { "text": "Good afternoon","response": "Good afternoon! How may I assist you today?" },
+  { "text": "Good evening", "response": "Good evening! How may I assist you today?" },
+  { "text": "Hey",          "response": "Hey there! How can I help you today?" },
+  { "text": "What's up?",   "response": "Not much, how about you?" },
+  { "text": "How are you?", "response": "I'm doing well, thank you for asking. How may I assist you today?" }
+]
+
