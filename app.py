@@ -83,7 +83,13 @@ def build_or_load_index(rebuild: bool = False):
             "Please add at least one .txt/.pdf/.docx file."
         )
 
-    index = VectorStoreIndex.from_documents(docs, embed_model=embed_model)
+    index = VectorStoreIndex.from_documents(
+    docs,
+    embed_model=embed_model,
+    chunk_size=200,   # force small chunks
+    chunk_overlap=0
+)
+
 
     if not STORAGE_DIR.exists():
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -155,11 +161,11 @@ def answer_from_docs(index, question: str) -> str:
 
 
 # ---------- STREAMLIT UI SETUP ----------
-st.set_page_config(page_title="Private Document Q&A Bot", page_icon="📚", layout="wide")
-st.title("📚 Private Document Q&A Bot")
+st.set_page_config(page_title="Q&A Bot", page_icon="📚", layout="wide")
+st.title("📚 Q&A Bot")
 
 st.markdown(
-    "Ask questions **only about the documents** loaded by the admin. "
+    "Ask questions related to capital of countries"
     "If something is not in the docs, the bot will say it doesn't know."
 )
 
