@@ -1,16 +1,30 @@
 India is a country in South Asia. Capital: New Delhi.
+
 United States is a country in North America. Capital: Washington, D.C.
+
 United Kingdom is a country in Europe. Capital: London.
+
 Australia is a country in Oceania. Capital: Canberra.
+
 Canada is a country in North America. Capital: Ottawa.
+
 Germany is a country in Europe. Capital: Berlin.
+
 France is a country in Europe. Capital: Paris.
+
 Japan is a country in East Asia. Capital: Tokyo.
+
 China is a country in East Asia. Capital: Beijing.
+
 South Korea is a country in East Asia. Capital: Seoul.
+
 Singapore is a country in Southeast Asia. Capital: Singapore.
+
 United Arab Emirates is a country in the Middle East. Capital: Abu Dhabi.
+
 Saudi Arabia is a country in the Middle East. Capital: Riyadh.
+
 Brazil is a country in South America. Capital: Brasília.
+
 South Africa is a country in Africa. Capital: Pretoria.
 
