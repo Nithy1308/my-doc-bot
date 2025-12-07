@@ -1,7 +1,6 @@
 import os
 import re
 from pathlib import Path
-
 import streamlit as st
 
 from llama_index.core import (
@@ -11,237 +10,173 @@ from llama_index.core import (
     load_index_from_storage,
 )
 from llama_index.core.retrievers import VectorIndexRetriever
+from llama_index.core.node_parser import SentenceSplitter
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 
 
-# ---------- BLOCK ANY OPENAI USAGE ----------
+# BLOCK ANY OPENAI USAGE
 os.environ.pop("OPENAI_API_KEY", None)
 os.environ.pop("OPENAI_API_BASE", None)
 os.environ.pop("OPENAI_BASE_URL", None)
-os.environ["LLAMA_INDEX_USE_OPENAI_EMBEDDINGS"] = "false"
 
-
-# ---------- PATH CONFIG ----------
 DOCS_DIR = Path("docs")
 STORAGE_DIR = Path("storage")
 
-
-# ---------- EMBEDDING MODEL (LOCAL) ----------
 embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
-print(">>> Using embedding model: BAAI/bge-small-en-v1.5")
 
 
-# ---------- SIMPLE GREETING MAP ----------
-GREETINGS_RESPONSES = {
+# -------------- SIMPLE GREETING MAP --------------
+GREETINGS = {
     "hi": "Hello there, how can I help you today?",
-    "hi!": "Hello there, how can I help you today?",
     "hello": "Hi, how can I help you today?",
-    "hello!": "Hi, how can I help you today?",
     "hey": "Hey there! How can I help you today?",
-    "helo": "Hi there, how can I help you today?",
     "good morning": "Good morning! How may I assist you today?",
     "good afternoon": "Good afternoon! How may I assist you today?",
     "good evening": "Good evening! How may I assist you today?",
-    "what's up?": "Not much, how about you?",
-    "how are you?": "I'm doing well, thank you for asking. How may I assist you today?",
 }
-print(">>> Greeting keys:", list(GREETINGS_RESPONSES.keys()))
 
 
-# ---------- INDEX BUILD / LOAD ----------
-def build_or_load_index(rebuild: bool = False):
-    """
-    Build the index from docs/ if it doesn't exist,
-    or load it from storage/ if already built.
+# ----------- LOAD / BUILD INDEX -----------
+def build_or_load_index(rebuild=False):
 
-    EXCLUDES any *.json files so config/greeting JSON is never treated as docs.
-    """
     if not rebuild and STORAGE_DIR.exists():
         try:
-            storage_context = StorageContext.from_defaults(persist_dir=str(STORAGE_DIR))
-            index = load_index_from_storage(storage_context)
-            print(">>> Loaded index from storage/")
-            return index
-        except Exception as e:
-            print(">>> Failed to load index, rebuilding. Error:", e)
+            storage_context = StorageContext.from_defaults(
+                persist_dir=str(STORAGE_DIR)
+            )
+            return load_index_from_storage(storage_context)
+        except Exception:
+            pass
 
     if not DOCS_DIR.exists():
         DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(">>> Building index from docs/ (excluding *.json)")
     docs = SimpleDirectoryReader(
         input_dir=str(DOCS_DIR),
-        recursive=False,
-        exclude=["*.json"],   # do not index greetings.json etc.
+        exclude=["*.json"],
     ).load_data()
 
-    print(">>> Number of docs indexed:", len(docs))
-
-    if len(docs) == 0:
+    if not docs:
         raise ValueError(
             f"No documents found in {DOCS_DIR.resolve()} (excluding *.json). "
             "Please add at least one .txt/.pdf/.docx file."
         )
 
-    index = VectorStoreIndex.from_documents(
-    docs,
-    embed_model=embed_model,
-    chunk_size=200,   # force small chunks
-    chunk_overlap=0
-)
+    # split into small chunks so one country / paragraph tends to be separate
+    parser = SentenceSplitter(chunk_size=120, chunk_overlap=0)
+    nodes = parser.get_nodes_from_documents(docs)
 
-
-    if not STORAGE_DIR.exists():
-        STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-
+    index = VectorStoreIndex(nodes, embed_model=embed_model)
     index.storage_context.persist(persist_dir=str(STORAGE_DIR))
-    print(">>> Index built and persisted to storage/")
     return index
 
 
-# ---------- ANSWER FROM DOCS WITH GUARDS ----------
+# -------------- MAIN ANSWER LOGIC (NO LLM) -------------
 def answer_from_docs(index, question: str) -> str:
     """
-    Use vector search to find the single most relevant chunk.
-
-    Only answer if:
-      - similarity score is high enough, AND
-      - at least one meaningful keyword from the question appears
-        in the candidate text.
-
-    Otherwise: "I don't know based on the documents."
+    Retrieve relevant text from docs and then keep only the lines
+    that contain at least one non-stopword keyword from the question.
+    If nothing matches, say we don't know.
     """
-    retriever = VectorIndexRetriever(index=index, similarity_top_k=1)
+    retriever = VectorIndexRetriever(index=index, similarity_top_k=3)
     nodes = retriever.retrieve(question)
 
     if not nodes:
         return "I don't know based on the documents."
 
-    best = nodes[0]
-    score = getattr(best, "score", None)
-    text = best.text if hasattr(best, "text") else best.node.get_content()
-    text = text or ""
-    text_lower = text.lower()
+    # combine a few top nodes (more chance to hit correct line)
+    combined_text = "\n".join(
+        [(n.text or "").strip() for n in nodes if (n.text or "").strip()]
+    )
+
+    if not combined_text:
+        return "I don't know based on the documents."
 
     print("\n=== Retrieved context for question ===")
     print("Q:", question)
-    print("Score:", score)
-    print(text[:500])
+    print(combined_text[:500])
     print("=== END CONTEXT ===\n")
 
-    # 1) Similarity threshold (quite strict)
-    if score is not None and score < 0.7:
-        return "I don't know based on the documents."
-
-    # 2) Keyword overlap guard
+    # 1) extract keywords from question
     words = re.findall(r"\w+", question.lower())
-    stopwords = {
-        "who", "what", "where", "when", "why", "how",
-        "is", "are", "am", "was", "were",
-        "a", "an", "the", "of", "in", "on", "at", "for",
-        "tell", "me", "about", "please", "do", "does", "did",
-        "you", "your"
+    stop = {
+        "what", "who", "why", "where", "when", "how",
+        "is", "are", "the", "a", "an", "in", "of", "to",
+        "please", "tell", "me", "about",
+        "capital", "country", "city"   # generic words – ignore them
     }
-    keywords = [w for w in words if w not in stopwords]
-
-    keyword_match = any(k in text_lower for k in keywords) if keywords else False
+    keywords = [w for w in words if w not in stop]
 
     print(">>> keywords:", keywords)
-    print(">>> keyword_match:", keyword_match)
 
-    if not keyword_match:
+    if not keywords:
         return "I don't know based on the documents."
 
-    # Passed both checks → return full text (no artificial cutoff)
-    text = text.strip()
-    if not text:
+    # 2) keep only lines that contain at least one keyword
+    lines = [ln.strip() for ln in combined_text.splitlines() if ln.strip()]
+    matched_lines = [
+        ln for ln in lines
+        if any(k in ln.lower() for k in keywords)
+    ]
+
+    print(">>> matched_lines:", matched_lines)
+
+    if not matched_lines:
         return "I don't know based on the documents."
 
-    return text
+    # Usually this will be exactly one line, e.g.
+    # "India is a country in South Asia. Capital: New Delhi."
+    return "\n".join(matched_lines)
 
 
-# ---------- STREAMLIT UI SETUP ----------
-st.set_page_config(page_title="Q&A Bot", page_icon="📚", layout="wide")
-st.title("📚 Q&A Bot")
+# -------------- STREAMLIT UI ----------------
+st.set_page_config(page_title="Docs Bot", layout="wide")
+st.title("📚 Private Document Q&A Bot")
 
-st.markdown(
-    "Ask questions related to capital of countries"
-    "If something is not in the docs, the bot will say it doesn't know."
-)
-
-
-# ---------- SIDEBAR (ADMIN AREA) ----------
 with st.sidebar:
     st.header("Admin Area")
-
-    admin_key = st.text_input("Admin key (optional)", type="password")
-    rebuild_pressed = False
+    admin_key = st.text_input("Admin key", type="password")
+    rebuild = False
 
     if admin_key == "mysecret":
         st.success("Admin mode active.")
-        st.markdown(
-            f"Docs folder: `{DOCS_DIR.resolve()}`\n\n"
-            "Add or update files there, then click the button below."
-        )
-        rebuild_pressed = st.button("🔁 Rebuild index from docs/")
+        rebuild = st.button("Rebuild index from docs/")
     else:
-        if admin_key:
-            st.error("Incorrect admin key.")
-        st.info("Enter admin key to rebuild the index after changing docs.")
+        st.info("Enter admin key to rebuild.")
 
-    st.markdown("---")
-    st.caption("Users will only see the chat on the main page.")
-
-
-# ---------- BUILD / LOAD INDEX ----------
 try:
-    index = build_or_load_index(rebuild=rebuild_pressed)
-except ValueError as e:
+    index = build_or_load_index(rebuild)
+except Exception as e:
     st.error(str(e))
     st.stop()
-except Exception as e:
-    st.error(f"Error while building/loading index: {e}")
-    st.stop()
 
 
-# ---------- CHAT STATE ----------
+# ---------- CHAT ----------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.write(m["content"])
 
-
-# ---------- USER INPUT ----------
-user_input = st.chat_input("Ask a question about the documents...")
+user_input = st.chat_input("Ask a question about your documents...")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.markdown(user_input)
+        st.write(user_input)
 
-    normalized = user_input.strip().lower()
-    print("\n>>> USER INPUT RAW:", repr(user_input))
-    print(">>> normalized:", repr(normalized))
+    norm = user_input.lower().strip()
 
-    # 1) Exact greeting match
-    if normalized in GREETINGS_RESPONSES:
-        answer = GREETINGS_RESPONSES[normalized]
-        print(">>> Matched greeting, using canned reply.")
-        with st.chat_message("assistant"):
-            st.markdown(answer)
-        st.session_state.messages.append({"role": "assistant", "content": answer})
-
+    # GREETING
+    if norm in GREETINGS:
+        reply = GREETINGS[norm]
     else:
-        # 2) Otherwise, answer from docs with similarity + keyword guards
-        print(">>> Not a greeting, answering from docs.")
-        with st.chat_message("assistant"):
-            with st.spinner("Searching your documents..."):
-                try:
-                    answer = answer_from_docs(index, user_input)
-                except Exception as e:
-                    answer = f"Error while generating answer: {e}"
-            st.markdown(answer)
-        st.session_state.messages.append({"role": "assistant", "content": answer})
+        # DOC ANSWER (NO LLM)
+        reply = answer_from_docs(index, user_input)
+
+    with st.chat_message("assistant"):
+        st.write(reply)
+
+    st.session_state.messages.append({"role": "assistant", "content": reply})
 
